@@ -1,23 +1,53 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  buildFiltersHref,
+  buildFiltersQuery,
+  parseFiltersFromSearchParams,
+  parseSeverityParam,
+  type EventFilters,
+  type SeverityFilter,
+} from "@/lib/filterEvents";
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 interface FilterBarProps {
   initialSearch: string;
-  initialSeverity: string;
+  initialSeverity: SeverityFilter;
 }
 
 /**
- * NOTE: at this checkpoint the original filter behaviour is preserved verbatim —
- * local state pushed into the URL with an un-debounced effect, plus an extra
- * navigation on mount. Bug #2 (duplicate fetches / broken history) is fixed in a
- * later step; this file only relocates the markup out of the page component.
+ * The URL is the single source of truth for both filters: this component never
+ * mirrors props back into state, it only publishes its draft to the URL.
+ *
+ * - `searchInput` is a draft so the field never lags behind typing; a search edit
+ *   is debounced, while `severity` is a discrete choice and publishes at once.
+ * - Publishing uses `router.push`, so each *settled* filter change is exactly one
+ *   history entry: Back/Forward step between filter states instead of walking a
+ *   query one letter at a time (the debounce is what keeps it from flooding).
+ * - Back/Forward is the only way the URL changes from outside this component, and
+ *   `popstate` is the browser's signal for exactly that, so it is the only place
+ *   the draft is re-adopted from the URL.
  */
 export function FilterBar({ initialSearch, initialSeverity }: FilterBarProps) {
   const router = useRouter();
-  const [search, setSearch] = useState(initialSearch);
-  const [severity, setSeverity] = useState(initialSeverity);
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [severity, setSeverity] = useState<SeverityFilter>(initialSeverity);
+
+  // Last filter pair this component wrote to (or read from) the URL. Seeding it
+  // from the server-rendered params means mounting never triggers a navigation.
+  const appliedFilters = useRef<EventFilters>({ search: initialSearch, severity: initialSeverity });
+
+  /** Write one filter pair to the URL and remember it as the published one. */
+  const publish = useCallback(
+    (next: EventFilters) => {
+      appliedFilters.current = next;
+      router.push(buildFiltersHref(next), { scroll: false });
+    },
+    [router]
+  );
 
   const renderCount = useRef(0);
   renderCount.current += 1;
@@ -30,11 +60,39 @@ export function FilterBar({ initialSearch, initialSeverity }: FilterBarProps) {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (search) params.set("search", search);
-    if (severity !== "all") params.set("severity", severity);
-    router.push(`/?${params.toString()}`);
-  }, [search, severity, router]);
+    const next: EventFilters = { search: searchInput, severity };
+    const applied = appliedFilters.current;
+    if (buildFiltersQuery(next) === buildFiltersQuery(applied)) return;
+
+    // A severity change is one discrete choice: publish it now, together with
+    // whatever search text is already in the box, instead of parking it behind
+    // the search debounce. Only a search-only edit waits.
+    if (next.severity !== applied.severity) {
+      publish(next);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      // A Back/Forward (or any other publish) replaces `appliedFilters`, which
+      // makes this draft stale: dropping it keeps the debounce from pushing a
+      // URL the user has already navigated away from.
+      if (appliedFilters.current !== applied) return;
+      publish(next);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput, severity, publish]);
+
+  useEffect(() => {
+    function handlePopState() {
+      const filters = parseFiltersFromSearchParams(new URLSearchParams(window.location.search));
+      appliedFilters.current = filters;
+      setSearchInput(filters.search);
+      setSeverity(filters.severity);
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   return (
     <div
@@ -48,8 +106,8 @@ export function FilterBar({ initialSearch, initialSeverity }: FilterBarProps) {
     >
       <input
         type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
         placeholder="Filter by service, title, or ID..."
         style={{
           flex: 1,
@@ -62,7 +120,7 @@ export function FilterBar({ initialSearch, initialSeverity }: FilterBarProps) {
       />
       <select
         value={severity}
-        onChange={(e) => setSeverity(e.target.value)}
+        onChange={(e) => setSeverity(parseSeverityParam(e.target.value))}
         style={{
           padding: "8px 12px",
           borderRadius: "6px",

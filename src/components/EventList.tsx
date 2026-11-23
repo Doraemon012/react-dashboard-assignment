@@ -1,60 +1,43 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { SystemEvent } from "@/lib/mockData";
 import { useSelection } from "@/components/SelectionProvider";
+import {
+  buildFiltersQuery,
+  parseFiltersFromSearchParams,
+  type EventFilters,
+} from "@/lib/filterEvents";
 
 interface EventListProps {
-  initialEvents: SystemEvent[];
-  initialSearch: string;
-  initialSeverity: string;
-}
-
-function buildQuery(search: string, severity: string): string {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  if (severity !== "all") params.set("severity", severity);
-  return params.toString();
+  /** Events the server rendered for `serverFilters`. */
+  serverEvents: SystemEvent[];
+  /** The filter pair `serverEvents` was computed for. */
+  serverFilters: EventFilters;
 }
 
 /**
- * NOTE: at this checkpoint the refetch is copied from the starter code — no
- * debounce, no AbortController and no response-order guard, so the race in
- * bug #2 is still live. Only the initial paint comes from the server now.
+ * Rows are rendered straight from the server payload, which already holds the
+ * filtered result for the URL query: a filter change is one RSC navigation, so
+ * refetching the same rows from /api/events would be a duplicate load.
+ *
+ * That also removes the ordering problem entirely. A payload is only ever shown
+ * as the result for the query it was computed for — when the URL has moved ahead
+ * of the payload (navigation in flight) the previous rows stay visible under the
+ * loading line instead of being presented as the new query's result.
  */
-export function EventList({ initialEvents, initialSearch, initialSeverity }: EventListProps) {
+export function EventList({ serverEvents, serverFilters }: EventListProps) {
   const searchParams = useSearchParams();
   const { selectedEvent, selectEvent } = useSelection();
 
-  const [events, setEvents] = useState<SystemEvent[]>(initialEvents);
-  const [loadingEvents, setLoadingEvents] = useState(false);
-
-  const search = searchParams.get("search") || "";
-  const severity = searchParams.get("severity") || "all";
-  const activeQuery = buildQuery(search, severity);
-
-  // Seeded from the server-rendered query so the first client paint does not
-  // fetch the same rows again.
-  const lastFetchedQuery = useRef(buildQuery(initialSearch, initialSeverity));
-
-  useEffect(() => {
-    if (activeQuery === lastFetchedQuery.current) return;
-    lastFetchedQuery.current = activeQuery;
-
-    setLoadingEvents(true);
-    fetch(`/api/events?${activeQuery}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setEvents(data.events || []);
-        setLoadingEvents(false);
-      });
-  }, [activeQuery]);
+  const urlQuery = buildFiltersQuery(parseFiltersFromSearchParams(searchParams));
+  const serverQuery = buildFiltersQuery(serverFilters);
+  const isLoading = serverQuery !== urlQuery;
 
   return (
     <div style={{ overflowY: "auto", flex: 1 }}>
-      {loadingEvents && <div style={{ padding: "12px", color: "#94a3b8" }}>Loading events...</div>}
-      {events.map((evt) => (
+      {isLoading && <div style={{ padding: "12px", color: "#94a3b8" }}>Loading events...</div>}
+      {serverEvents.map((evt) => (
         <div
           key={evt.id}
           onClick={() => selectEvent(evt)}

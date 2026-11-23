@@ -1,47 +1,22 @@
 "use client";
 
-import React from "react";
+import { RawPayloadView } from "@/components/RawPayloadView";
+import { SummaryOutput } from "@/components/SummaryOutput";
 
 /**
- * Simulates an expensive markdown / syntax highlighting component.
- * Intentionally un-memoized in starter code so parent re-renders cause noticeable lag.
+ * Layout shell for the two formatter halves, so the markup and styles are the
+ * ones the starter shipped.
+ *
+ * The work is split by update frequency: `SummaryOutput` changes on every
+ * streamed token, `RawPayloadView` is memoised and only re-formats when the
+ * selected event changes. This wrapper itself is cheap — it exists to keep the
+ * gap/stacking style in one place.
  */
 export function HeavyPayloadFormatter({ rawPayload, summaryText }: { rawPayload: string; summaryText: string }) {
-  // Simulate ~12ms of synchronous formatting work per render
-  const start = performance.now();
-  while (performance.now() - start < 12) {
-    // busy-wait: stands in for markdown parsing / syntax highlighting
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <div
-        style={{
-          background: "#1e293b",
-          padding: "14px",
-          borderRadius: "8px",
-          border: "1px solid #334155",
-          whiteSpace: "pre-wrap",
-          lineHeight: 1.55,
-          minHeight: "180px",
-        }}
-      >
-        {summaryText || "Select an event to generate an AI incident analysis..."}
-      </div>
-      <details open>
-        <summary style={{ cursor: "pointer", color: "#94a3b8", fontSize: "13px" }}>Raw Telemetry Payload</summary>
-        <pre
-          style={{
-            background: "#020617",
-            padding: "12px",
-            borderRadius: "6px",
-            fontSize: "12px",
-            overflowX: "auto",
-          }}
-        >
-          {rawPayload}
-        </pre>
-      </details>
+      <SummaryOutput summaryText={summaryText} />
+      <RawPayloadView rawPayload={rawPayload} />
     </div>
   );
 }
